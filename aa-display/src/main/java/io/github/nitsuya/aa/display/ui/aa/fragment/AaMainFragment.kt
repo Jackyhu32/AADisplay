@@ -80,6 +80,10 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
     private var restorePendingSecondary = ""
     private var restorePendingRearms = 0
     private var imeChipVisible = false
+    private var primaryControls: View? = null
+    private var secondaryControls: View? = null
+    private val hidePrimaryControls = Runnable { primaryControls?.isVisible = false }
+    private val hideSecondaryControls = Runnable { secondaryControls?.isVisible = false }
     private var imeChipPane = SplitPane.PRIMARY
 
     private val broadcastReceiver = object : BroadcastReceiver() {
@@ -268,6 +272,8 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
         setupDivider()
         setupPaneSurfaces()
         setupEmptyPaneClicks()
+        primaryControls = addPaneControls(SplitPane.PRIMARY, baseBinding.panePrimary)
+        secondaryControls = addPaneControls(SplitPane.SECONDARY, baseBinding.paneSecondary)
         baseBinding.btnHideIme.setOnClickListener {
             applyImeChip(false, imeChipPane)
             CoreApi.hideIme()
@@ -1610,15 +1616,10 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
     }
 
     private fun layoutTargetSize(): Pair<Int, Int> {
-        // Follow the live CarActivity presentation. Do not target a larger
-        // observed HU here — resizing that VD without a matching Surface
-        // blacks the head unit.
-        val host = hostPresentationSize()
+        // 直接返回当前容器的真实尺寸，强制系统每次都以此尺寸重置 VirtualDisplay，完美消除黑边
         val cw = baseBinding.splitContainer.width
         val ch = baseBinding.splitContainer.height
-        val w = maxOf(host?.first ?: 0, cw)
-        val h = maxOf(host?.second ?: 0, ch)
-        return w to h
+        return cw to ch
     }
 
     private fun layoutSizeMismatchTolerancePx(width: Int): Int =
@@ -1777,6 +1778,12 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
         // Coalesce MOVE to ~1/frame so Binder inject is not flooded during fast drags.
         val flushMove = flushRunnableFor(pane)
         textureView.setOnTouchListener { _, e ->
+            // 【新增防線 1】：如果螢幕失效或 Surface 已被銷毀，立即停止轉發，防止崩潰
+            val currentSurface = if (pane == io.github.nitsuya.aa.display.ui.aa.split.SplitPane.PRIMARY) primarySurface else secondarySurface
+            if (displayId == android.view.Display.INVALID_DISPLAY || currentSurface?.isValid != true) {
+                return@setOnTouchListener false
+            }
+
             // Fullscreen: ignore touches on the hidden pane TextureView.
             if (SplitPane.isFullscreenPane(fullscreenPane) && pane != fullscreenPane) {
                 return@setOnTouchListener false
@@ -1786,9 +1793,18 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
             if (consumeImeChipTouch(e)) {
                 return@setOnTouchListener true
             }
+
             val uptimeMillis = SystemClock.uptimeMillis()
             if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                 setDownTime(uptimeMillis)
+
+                // 【新增功能 2】：觸摸時顯示控制按鈕，3秒後自動隱藏
+                val controls = if (pane == io.github.nitsuya.aa.display.ui.aa.split.SplitPane.PRIMARY) primaryControls else secondaryControls
+                val hideRunnable = if (pane == io.github.nitsuya.aa.display.ui.aa.split.SplitPane.PRIMARY) hidePrimaryControls else hideSecondaryControls
+
+                controls?.isVisible = true
+                textureView.removeCallbacks(hideRunnable)
+                textureView.postDelayed(hideRunnable, 3000L)
             }
             val down = if (pane == SplitPane.PRIMARY) repairDownTimePrimary else repairDownTimeSecondary
             val newEvent = rewriteMotionEvent(
@@ -1927,5 +1943,66 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
         chip.layoutParams = lp
         // HID mouse hit-tests via shell geometry; refresh after layout settles.
         chip.post { reportHidShellLayout() }
+    }
+    private fun addPaneControls(pane: Int, parent: FrameLayout): View {
+        // 使用 applicationContext 避开 Google Play 资源隔离报错
+        val context = parent.context.applicationContext ?: parent.context
+        val layout = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.HORIZONTAL
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(android.graphics.Color.parseColor("#80000000"))
+                cornerRadius = 16f * context.resources.displayMetrics.density
+            }
+            setPadding(10, 5, 10, 5)
+            isVisible = false
+            elevation = 10f
+            setOnTouchListener { _, _ -> true } // 拦截穿透
+        }
+
+        val btnWidth = (48f * context.resources.displayMetrics.density).toInt()
+        val btnHeight = (36f * context.resources.displayMetrics.density).toInt()
+
+        // 使用 TextView 替代 Button，彻底避开澎湃 OS 主题寻找导致的闪退
+        val backBtn = android.widget.TextView(context).apply {
+            text = "返回"
+            textSize = 14f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(android.graphics.Color.WHITE)
+            layoutParams = android.widget.LinearLayout.LayoutParams(btnWidth, btnHeight)
+            setOnClickListener {
+                if (displayId != android.view.Display.INVALID_DISPLAY) {
+                    try {
+                        io.github.nitsuya.aa.display.CoreApi.pressKey(android.view.KeyEvent.KEYCODE_BACK)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "pressKey failed", e)
+                    }
+                }
+            }
+        }
+
+        val switchBtn = android.widget.TextView(context).apply {
+            text = "切换"
+            textSize = 14f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(android.graphics.Color.WHITE)
+            layoutParams = android.widget.LinearLayout.LayoutParams(btnWidth, btnHeight)
+            setOnClickListener {
+                if (::appPicker.isInitialized) appPicker.show(pane)
+            }
+        }
+
+        layout.addView(backBtn)
+        layout.addView(switchBtn)
+
+        val params = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.END
+            bottomMargin = (24f * context.resources.displayMetrics.density).toInt()
+            marginEnd = (24f * context.resources.displayMetrics.density).toInt()
+        }
+        parent.addView(layout, params)
+        return layout
     }
 }

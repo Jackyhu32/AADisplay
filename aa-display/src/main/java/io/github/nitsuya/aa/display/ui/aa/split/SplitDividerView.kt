@@ -135,12 +135,17 @@ class SplitDividerView @JvmOverloads constructor(
         clipToOutline = false
         setBackgroundColor(0x00000000)
     }
-
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        // 將整個分隔條的區域加入系統手勢排除名單，防止拖曳時觸發側滑返回
+        systemGestureExclusionRects = listOf(android.graphics.Rect(0, 0, w, h))
+    }
     /**
      * Abort an in-flight gesture (e.g. before covering this view with Recents).
      * Clears tracking / disallow-intercept; if a peel drag preview was active,
      * notifies [onPeelCancelled] so the host can drop dividerDragging.
      */
+
     fun resetGesture() {
         val wasPeelDrag = peelMode && dragging
         removeCallbacks(longPressRunnable)
