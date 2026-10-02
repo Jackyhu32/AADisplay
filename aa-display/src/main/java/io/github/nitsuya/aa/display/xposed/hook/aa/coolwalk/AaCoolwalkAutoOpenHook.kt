@@ -37,10 +37,7 @@ object AaCoolwalkAutoOpenHook {
         reason: String = "unknown",
         bypassRearmGap: Boolean = false,
     ) {
-        if (env.startMethod == null) {
-            log(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen skip ($reason): startMethod null")
-            return
-        }
+
         CoolwalkRailCoordinator.syncExternalTruth(InitFields.appContext.contentResolver)
         val snap = CoolwalkRailCoordinator.current()
         if (snap.phase == RailPhase.ReconnectSettling && snap.fullHuWidthPx <= 0 &&
@@ -91,7 +88,6 @@ object AaCoolwalkAutoOpenHook {
      *   still false — the CarActivity presentation VD may already exist at content-slot width.
      */
     fun scheduleFullBleedRelaunch(env: CoolwalkHookEnv, reason: String, force: Boolean = false) {
-        if (env.startMethod == null) return
         if (!force && !env.mAaDisplayShownThisSession) {
             logDebug(CoolwalkHookEnv.TAG, "AaUiHook: full-bleed relaunch ($reason) → AutoOpen (not shown)")
             scheduleAutoOpenIfNeeded(env, reason, bypassRearmGap = true)
@@ -171,19 +167,22 @@ object AaCoolwalkAutoOpenHook {
             else -> "${delayMs}ms"
         }
         try {
-            method.invoke(null, aaDisplayLaunchIntent())
-            logDebug(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen invoke at $label")
-        } catch (e: InvocationTargetException) {
-            val cause = e.cause ?: e
-            if (isAutoOpenNotReady(cause)) {
-                logDebug(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen not-ready at $label: ${cause.message}")
+            val intent = aaDisplayLaunchIntent()
+            if (env.startMethod != null) {
+                // 如果能找到旧版启动类，走原版逻辑
+                env.startMethod!!.invoke(null, intent)
+                logDebug(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen invoke via startMethod at $label")
             } else {
-                log(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen invoke failed at $label", cause)
+                // 【核心修复】：Google 类失效时，使用原生 API 强行启动 AADisplay 服务
+                try {
+                    InitFields.appContext.startService(intent)
+                } catch (e: Throwable) {
+                    // 兼容高版本安卓后台启动限制
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    InitFields.appContext.startActivity(intent)
+                }
+                logDebug(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen invoke via fallback at $label")
             }
-        } catch (e: IllegalStateException) {
-            logDebug(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen not-ready at $label: ${e.message}")
-        } catch (e: NullPointerException) {
-            logDebug(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen not-ready at $label: ${e.message}")
         } catch (e: Throwable) {
             log(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen invoke failed at $label", e)
         }

@@ -1616,10 +1616,13 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
     }
 
     private fun layoutTargetSize(): Pair<Int, Int> {
-        // 直接返回当前容器的真实尺寸，强制系统每次都以此尺寸重置 VirtualDisplay，完美消除黑边
         val cw = baseBinding.splitContainer.width
         val ch = baseBinding.splitContainer.height
-        return cw to ch
+        // 容器有真实尺寸用真实尺寸，没有就用车机物理尺寸兜底（原版逻辑）
+        if (cw > 0 && ch > 0) {
+            return cw to ch
+        }
+        return hostPresentationSize() ?: (1920 to 720)
     }
 
     private fun layoutSizeMismatchTolerancePx(width: Int): Int =
@@ -1664,21 +1667,20 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
     private fun requestDisplay(reason: String) {
         val displayWidth = baseBinding.splitContainer.width
         val displayHeight = baseBinding.splitContainer.height
+
         val displayDpi = resolveHostDensityDpi()
-        Log.d(
-            TAG,
-            "requestDisplay[$reason]: ${displayWidth}x$displayHeight,$displayDpi " +
-                "requested=$isDisplayCreateRequested display=$displayId",
-        )
+        Log.d(TAG, "requestDisplay[$reason]: container=${displayWidth}x${displayHeight}, dpi=$displayDpi")
+
         if (displayWidth <= 0 || displayHeight <= 0) return
         val (targetW, targetH) = layoutTargetSize()
-        val tol = layoutSizeMismatchTolerancePx(targetW.coerceAtLeast(1))
+        val tol = layoutSizeMismatchTolerancePx(targetW.coerceAtLeast(targetH))
         if (displayWidth < targetW - tol || displayHeight < targetH - tol) {
             scheduleHostLayoutCatchup(reason)
             return
         }
+
         if (primarySurface == null || secondarySurface == null) {
-            Log.d(TAG, "requestDisplay[$reason] waiting for both surfaces")
+            Log.d(TAG, "requestDisplay[$reason] waiting for surfaces")
             return
         }
         if (isDisplayCreateRequested && displayId == Display.INVALID_DISPLAY) {
