@@ -23,6 +23,7 @@ class CoolwalkHookEnv {
 
     var layoutInfoConstructors: List<Constructor<*>> = emptyList()
     var startMethod: Method? = null
+    internal var carActivityLaunchTarget: CarActivityLaunchTarget? = null
     @Volatile var hasVerticalRailField: Field? = null
     @Volatile var layoutResourceIdField: Field? = null
     var contentBoundsMethods: List<Method> = emptyList()
@@ -180,8 +181,8 @@ class CoolwalkHookEnv {
     fun resolveCarStartActivityMethod(): Method? {
         val clazz = try {
             loadClass("com.google.android.projection.gearhead.service.CarSystemUiControllerService")
-        } catch (e: Throwable) {
-            log(TAG, "AaUiHook: CarSystemUiControllerService missing", e)
+        } catch (_: ClassNotFoundException) {
+            log(TAG, "AaUiHook: legacy SysUi service absent; resolving projection controller")
             return null
         }
         try {

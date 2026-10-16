@@ -92,29 +92,38 @@ internal class SplitVdLifecycle(private val c: SplitDisplayController) {
         if (!primaryChanged && !secondaryChanged && reason != "reconnect") {
             return
         }
-        c.mLastPrimaryW = sizes.primaryW
-        c.mLastPrimaryH = sizes.primaryH
-        c.mLastSecondaryW = sizes.secondaryW
-        c.mLastSecondaryH = sizes.secondaryH
         c.mLastResizeAt = SystemClock.uptimeMillis()
         c.mSuppressReclaimUntil = maxOf(
             c.mSuppressReclaimUntil,
             SystemClock.uptimeMillis() + 800L,
         )
-        try {
-            // Only resize panes whose buffer size actually changes. Fullscreen toggle between
-            // panes is a no-op size-wise; resizing both always triggered Samsung
-            // ExtraDisplayController.positionChildAt and dropped LivePlay focus/audio.
-            if (primaryChanged || reason == "reconnect") {
+        // Only resize panes whose buffer size actually changes. Fullscreen toggle between
+        // panes is a no-op size-wise; resizing both always triggered Samsung
+        // ExtraDisplayController.positionChildAt and dropped LivePlay focus/audio.
+        //
+        // Commit mLast* only after a successful resize: it is the "size already applied to
+        // the VD" baseline for the change test above and for ratioShrinkFlags(), so writing
+        // it before a throwing resize would leave the VD stale while every later
+        // resize-to-that-size short-circuits as "unchanged" (pane shows a cropped slice).
+        if (primaryChanged || reason == "reconnect") {
+            try {
                 primary.resize(sizes.primaryW, sizes.primaryH, c.mDensityDpi)
+                c.mLastPrimaryW = sizes.primaryW
+                c.mLastPrimaryH = sizes.primaryH
                 applyPolicies(SplitPane.PRIMARY, "resize-$reason")
+            } catch (e: Throwable) {
+                log(SplitDisplayController.TAG, "resize primary failed:", e)
             }
-            if (secondaryChanged || reason == "reconnect") {
+        }
+        if (secondaryChanged || reason == "reconnect") {
+            try {
                 secondary.resize(sizes.secondaryW, sizes.secondaryH, c.mDensityDpi)
+                c.mLastSecondaryW = sizes.secondaryW
+                c.mLastSecondaryH = sizes.secondaryH
                 applyPolicies(SplitPane.SECONDARY, "resize-$reason")
+            } catch (e: Throwable) {
+                log(SplitDisplayController.TAG, "resize secondary failed:", e)
             }
-        } catch (e: Throwable) {
-            log(SplitDisplayController.TAG, "resize failed:", e)
         }
     }
 

@@ -398,7 +398,9 @@ class SplitDividerView @JvmOverloads constructor(
                     val wasLongPress =
                         SplitPane.qualifiesDividerLongPress(runnableLongPress, heldMs)
                     // Final sample before clearing tracking (setRatio may run from layout).
-                    if (wasDragging && !wasLongPress) {
+                    // Only for UP: a CANCEL point is not a reliable finger position, so it
+                    // must never feed settleDrag (rawRatio≈0 would enter fullscreen).
+                    if (isUp && wasDragging && !wasLongPress) {
                         lastRawRatio = rawRatioFromEvent(event, parentView)
                         lastRatio = lastRawRatio
                     }
@@ -416,6 +418,18 @@ class SplitDividerView @JvmOverloads constructor(
                         wasDragging, wasLongPress, heldMs, dist, touchSlop.toFloat(), ratioDelta,
                     )
                     val branch = when {
+                        !isUp -> {
+                            // Gesture aborted (system / ancestor stole the stream — e.g. the
+                            // car's edge back gesture). Revert the preview and settle the
+                            // divider back to the pre-press ratio instead of crossing a
+                            // fullscreen threshold off a cancel point.
+                            if (wasDragging) {
+                                lastRatio = downRatio
+                                lastRawRatio = downRatio
+                                onPeelCancelled?.invoke()
+                            }
+                            "cancel"
+                        }
                         isUp && SplitPane.qualifiesDividerRecentOnUp(
                             wasLongPress, wasDragging, dist, touchSlop.toFloat(), ratioDelta,
                         ) -> {

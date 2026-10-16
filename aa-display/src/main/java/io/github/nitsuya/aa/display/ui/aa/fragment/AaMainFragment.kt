@@ -1993,8 +1993,24 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
             }
         }
 
+        // 全屏（含车机边缘手势回退后）一键恢复分屏：无需再拖车机边缘的手柄，
+        // 回到 1:1 并排后即可拖分隔条。避免边缘滑动触发车机返回导致无法分屏。
+        val splitBtn = android.widget.TextView(context).apply {
+            text = "分屏"
+            textSize = 14f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(android.graphics.Color.WHITE)
+            layoutParams = android.widget.LinearLayout.LayoutParams(btnWidth, btnHeight)
+            setOnClickListener {
+                if (SplitPane.isFullscreenPane(fullscreenPane)) {
+                    exitFullscreen(SplitPane.DEFAULT_RATIO)
+                }
+            }
+        }
+
         layout.addView(backBtn)
         layout.addView(switchBtn)
+        layout.addView(splitBtn)
 
         val params = FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,

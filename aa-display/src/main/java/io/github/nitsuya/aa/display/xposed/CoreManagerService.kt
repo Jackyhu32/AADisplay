@@ -293,6 +293,25 @@ class CoreManagerService private constructor() : ICoreManager.Stub() {
         }
 
         /**
+         * Host window shrink (car-native split): [DisplayProfileSettle.settle] plus the
+         * Coolwalk session snapshot keep reporting the pre-split full HU width, so the VDs
+         * would stay oversized and each pane would show a cropped slice instead of a scaled
+         * layout. Only a single-rail-shaped gap is a legitimate full-HU inflation (Coolwalk
+         * content slot); anything wider means the AA viewport itself shrank, so the locked
+         * profile must follow the reported host viewport.
+         */
+        private fun followHostViewport(reportedWidth: Int, profile: DisplayProfile): DisplayProfile {
+            if (profile.width <= reportedWidth) return profile
+            if (DisplayProfileSettle.isContentSlotVsFull(reportedWidth, profile.width)) return profile
+            logDebug(
+                TAG,
+                "displayProfile host-shrink: ${profile.width} -> $reportedWidth " +
+                    "(non-rail gap ${profile.width - reportedWidth})"
+            )
+            return profile.copy(width = reportedWidth)
+        }
+
+        /**
          * Single settle rule (see [DisplayProfileSettle]): live rail strip → HU−rail;
          * otherwise full HU. Replaces the old grow-immediate / shrink-confirm tug-of-war.
          */
@@ -314,11 +333,12 @@ class CoreManagerService private constructor() : ICoreManager.Stub() {
                 railWidthPx = railW,
                 fullHuWidthPx = fullW,
             )
-            val candidate = sanitizeDisplayProfile(
+            var candidate = sanitizeDisplayProfile(
                 settledSize.width,
                 settledSize.height,
                 settledSize.densityDpi,
             )
+            candidate = followHostViewport(reported.width, candidate)
             val current = mLockedDisplayProfile
             if (current == null) {
                 mLockedDisplayProfile = candidate
