@@ -14,7 +14,6 @@ import io.github.nitsuya.aa.display.service.AaActivityService
 import io.github.nitsuya.aa.display.util.AABroadcastConst
 import io.github.nitsuya.aa.display.xposed.util.log
 import io.github.nitsuya.aa.display.xposed.util.logDebug
-import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Modifier
 
 object AaCoolwalkAutoOpenHook {
@@ -151,16 +150,12 @@ object AaCoolwalkAutoOpenHook {
         )
     }
 
-    private fun isAutoOpenNotReady(t: Throwable): Boolean =
-        t is IllegalStateException || t is NullPointerException
-
     private fun tryAutoOpenAaDisplay(env: CoolwalkHookEnv, delayMs: Long) {
         if (env.mAaDisplayShownThisSession) {
             markAaDisplayShown(env, "flag")
             return
         }
         if (!env.mAutoOpenArmed) return
-        val method = env.startMethod ?: return
         val label = when {
             delayMs == -2L -> "full-bleed-relaunch"
             delayMs < 0L -> "connected"
