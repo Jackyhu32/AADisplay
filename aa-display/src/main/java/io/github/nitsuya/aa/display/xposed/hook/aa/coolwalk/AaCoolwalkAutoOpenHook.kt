@@ -14,6 +14,7 @@ import io.github.nitsuya.aa.display.service.AaActivityService
 import io.github.nitsuya.aa.display.util.AABroadcastConst
 import io.github.nitsuya.aa.display.xposed.util.log
 import io.github.nitsuya.aa.display.xposed.util.logDebug
+import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Modifier
 
 object AaCoolwalkAutoOpenHook {
@@ -25,7 +26,11 @@ object AaCoolwalkAutoOpenHook {
     private var lastFullBleedRelaunchScheduleUptimeMs = -1L
 
     fun install(env: CoolwalkHookEnv, lpparam: XC_LoadPackage.LoadPackageParam) {
-        logDebug(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen always-on startMethod=${env.startMethod?.name}")
+        log(
+            CoolwalkHookEnv.TAG,
+            "AaUiHook: AutoOpen always-on legacy=${env.startMethod?.name} " +
+                "controller=${env.carActivityLaunchTarget?.method?.declaringClass?.name}",
+        )
         registerAutoOpenShownReceiver(env)
         registerFullBleedRelaunchReceiver(env)
         hookCarSystemUiConnectedKick(env)
@@ -163,23 +168,27 @@ object AaCoolwalkAutoOpenHook {
         }
         try {
             val intent = aaDisplayLaunchIntent()
-            if (env.startMethod != null) {
-                // 如果能找到旧版启动类，走原版逻辑
-                env.startMethod!!.invoke(null, intent)
-                logDebug(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen invoke via startMethod at $label")
-            } else {
-                // 【核心修复】：Google 类失效时，使用原生 API 强行启动 AADisplay 服务
-                try {
-                    InitFields.appContext.startService(intent)
-                } catch (e: Throwable) {
-                    // 兼容高版本安卓后台启动限制
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    InitFields.appContext.startActivity(intent)
+            val legacy = env.startMethod
+            val controller = env.carActivityLaunchTarget
+            when {
+                legacy != null -> {
+                    legacy.invoke(null, intent)
+                    log(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen requested via legacy at $label; awaiting AA_DISPLAY_SHOWN")
                 }
-                logDebug(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen invoke via fallback at $label")
+                controller != null -> {
+                    controller.launch(intent)
+                    log(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen requested via controller at $label; awaiting AA_DISPLAY_SHOWN")
+                }
+                else -> {
+                    log(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen unavailable at $label: no CarActivity launch target")
+                }
             }
         } catch (e: Throwable) {
-            log(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen invoke failed at $label", e)
+            var cause = e
+            while (cause is InvocationTargetException && cause.targetException != null) {
+                cause = cause.targetException
+            }
+            log(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen invoke failed at $label", cause)
         }
     }
 
@@ -248,6 +257,10 @@ object AaCoolwalkAutoOpenHook {
 
     private fun hookCarSystemUiConnectedKick(env: CoolwalkHookEnv) {
         if (env.mCarConnectedKickHooked) return
+        if (env.startMethod == null) {
+            log(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen uses layout/config retries without legacy connected-kick")
+            return
+        }
         val svcClass = try {
             loadClass("com.google.android.projection.gearhead.service.CarSystemUiControllerService")
         } catch (e: Throwable) {
@@ -336,6 +349,6 @@ object AaCoolwalkAutoOpenHook {
         env.mAaDisplayShownThisSession = true
         env.mAutoOpenArmed = false
         env.mFacetEnsureHandler.removeCallbacksAndMessages(CoolwalkHookEnv.AUTO_OPEN_TOKEN)
-        logDebug(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen stop retries ($reason)")
+        log(CoolwalkHookEnv.TAG, "AaUiHook: AutoOpen stop retries ($reason)")
     }
 }

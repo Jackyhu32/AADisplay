@@ -142,7 +142,7 @@ DexKit 查询 **不要** 写 `searchPackages = listOf("")`（2.0.7 会只搜无�
 3. `CoolwalkFacetChrome`：折叠 facet 列、全窗扫 gutter；`GhFacetBar` VD **饿成 1×H**（见 [COOLWALK_FACETBAR.md](COOLWALK_FACETBAR.md)）。
 4. `rewriteVirtualDisplayArgs`：名为 `Dashboard` 的 VD **饿成 1×1**（空媒体卡）。
 5. `content_bounds` 扩满 → 广播 `ACTION_COOLWALK_FULL_BLEED` → `AaMainFragment.requestDisplay`。
-6. Auto Open：武装后立刻 + 分档重试调用 `CarSystemUiControllerService` 静态 `start(Intent)`；`car-connected` 再踢一次；收到 `ACTION_AA_DISPLAY_SHOWN` 才停。
+6. Auto Open：旧版调用 `CarSystemUiControllerService` 静态 `start(Intent)`；AA 17.9+ 在 `:projection` 用 DexKit 定位并调用 CarActivity 控制器。启动重试在收到 `ACTION_AA_DISPLAY_SHOWN` 后停止。实现与移植说明见 [AA_17_9_CAR_ACTIVITY_LAUNCH.md](AA_17_9_CAR_ACTIVITY_LAUNCH.md)。
 
 **AADisplay 进程（非 gearhead）**
 

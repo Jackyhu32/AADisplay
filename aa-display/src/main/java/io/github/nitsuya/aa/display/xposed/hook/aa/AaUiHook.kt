@@ -8,6 +8,7 @@ import io.github.nitsuya.aa.display.xposed.hook.aa.coolwalk.AaCoolwalkCompositor
 import io.github.nitsuya.aa.display.xposed.hook.aa.coolwalk.AaCoolwalkHuTouchHook
 import io.github.nitsuya.aa.display.xposed.hook.aa.coolwalk.AaCoolwalkLayoutHook
 import io.github.nitsuya.aa.display.xposed.hook.aa.coolwalk.AaCoolwalkProjectionHook
+import io.github.nitsuya.aa.display.xposed.hook.aa.coolwalk.CarActivityLaunchTarget
 import io.github.nitsuya.aa.display.xposed.hook.aa.coolwalk.CoolwalkDrawingSpecWiden
 import io.github.nitsuya.aa.display.xposed.hook.aa.coolwalk.CoolwalkFacetBarSurfaceHook
 import io.github.nitsuya.aa.display.xposed.hook.aa.coolwalk.CoolwalkFacetChrome
@@ -27,6 +28,7 @@ object AaUiHook : AaHook() {
     private const val CACHE_HU_TOUCH = "hook.AaUiHook.hu_touch"
     private const val CACHE_LAYOUT_INFO = "hook.AaUiHook.layout_info_class"
     private const val CACHE_PROJECTION_BOUNDS = "hook.AaUiHook.projection_bounds_class"
+    private const val CACHE_CAR_ACTIVITY_START = "hook.AaUiHook.car_activity_start"
 
     private val env = CoolwalkHookEnv()
 
@@ -60,6 +62,18 @@ object AaUiHook : AaHook() {
                 " (cache)",
         )
         env.startMethod = env.resolveCarStartActivityMethod()
+        env.carActivityLaunchTarget = null
+        if (env.startMethod == null) {
+            // Old cache files lack this coordinate and must perform one live scan.
+            val ref = cache.getRef(CACHE_CAR_ACTIVITY_START) ?: return false
+            val method = cache.resolve(lpparam.classLoader, ref) ?: return false
+            env.carActivityLaunchTarget = runCatching {
+                CarActivityLaunchTarget.resolve(method)
+            }.onFailure { e ->
+                log(tagName, "AaUiHook: CarActivity start cache resolve failed", e)
+            }.getOrNull() ?: return false
+            log(tagName, "AaUiHook: CarActivity start=${method.declaringClass.name}#${method.name} (cache)")
+        }
         env.projectionBoundsClassName = cache.getString(CACHE_PROJECTION_BOUNDS)
         // New key: miss once so DexKit finds `{blX=` compositor bounds class.
         if (env.projectionBoundsClassName.isNullOrEmpty()) return false
@@ -89,6 +103,7 @@ object AaUiHook : AaHook() {
         cache.putRefs(CACHE_CONTENT_BOUNDS, env.contentBoundsMethods)
         cache.putRefs(CACHE_FACET_SURFACE, env.facetBarSurfaceMethods)
         cache.putRef(CACHE_HU_TOUCH, env.huTouchDispatchMethod)
+        cache.putRef(CACHE_CAR_ACTIVITY_START, env.carActivityLaunchTarget?.method)
         if (lpparam.processName != processCar && env.layoutInfoConstructors.isNotEmpty()) {
             cache.putString(CACHE_LAYOUT_INFO, env.layoutInfoConstructors[0].declaringClass.name)
         }
@@ -181,6 +196,25 @@ object AaUiHook : AaHook() {
         CoolwalkProjectionBoundsHook.rememberClassName(env.projectionBoundsClassName)
 
         env.startMethod = env.resolveCarStartActivityMethod()
+        env.carActivityLaunchTarget = null
+        if (env.startMethod == null) {
+            env.carActivityLaunchTarget = try {
+                val methods = bridge.findMethod {
+                    matcher { usingStrings(CarActivityLaunchTarget.START_LOG) }
+                }
+                require(methods.size == 1) {
+                    "Expected one AA CarActivity start log match, found ${methods.size}"
+                }
+                val method = methods.single().getMethodInstance(lpparam.classLoader)
+                CarActivityLaunchTarget.resolve(method).also {
+                    log(tagName, "AaUiHook: CarActivity start=${method.declaringClass.name}#${method.name} (DexKit)")
+                }
+            } catch (e: Throwable) {
+                // Failure of this optional target must not prevent layout/input hooks.
+                log(tagName, "AaUiHook: CarActivity start resolve failed", e)
+                null
+            }
+        }
 
         if (lpparam.processName == processCar) {
             env.loadProjectionResources()
